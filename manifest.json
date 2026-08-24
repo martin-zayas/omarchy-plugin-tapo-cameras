@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "martin-zayas-tapo-cameras",
+  "name": "TAPO Cameras",
+  "version": "0.1.0",
+  "author": "Martin Zayas",
+  "license": "MIT",
+  "description": "View TAPO security cameras via RTSP in a floating PiP window. Configure cameras from the bar panel, keep the stream visible while working, with auto-reconnect and pause-on-fullscreen.",
+  "kinds": ["service", "bar-widget"],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "TAPO Cameras",
+    "description": "RTSP camera viewer with PiP overlay and camera configuration.",
+    "category": "Desktop",
+    "defaultSection": "right",
+    "allowMultiple": false
+  }
+}

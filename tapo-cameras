@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# tapo-cameras — CLI control for the martin-zayas-tapo-cameras Omarchy plugin.
+#
+#   omarchy-shell martin-zayas-tapo-cameras <fn> [args]
+# ==============================================================================
+
+set -euo pipefail
+
+APP_NAME="TAPO Cameras"
+IPC_TARGET="martin-zayas-tapo-cameras"
+PLUGIN_ID="martin-zayas-tapo-cameras"
+LOG_DIR="${XDG_CACHE_HOME:-$HOME/.cache}"
+LOG_FILE="$LOG_DIR/tapo-cameras.log"
+LOG_MAX_BYTES=$(( 256 * 1024 ))
+mkdir -p "$LOG_DIR"
+
+if [ -L "$LOG_FILE" ] || { [ -e "$LOG_FILE" ] && [ ! -f "$LOG_FILE" ]; }; then
+  LOG_FILE=/dev/null
+fi
+
+rotate_log() {
+  local size
+  [ -f "$LOG_FILE" ] || return 0
+  size=$(stat -c %s "$LOG_FILE" 2>/dev/null) || return 0
+  [ "$size" -gt "$LOG_MAX_BYTES" ] || return 0
+  mv -f "$LOG_FILE" "$LOG_FILE.1" 2>/dev/null || : > "$LOG_FILE"
+}
+rotate_log
+
+TXT_ERR_NO_SHELL="omarchy-shell (Quickshell) isn't running. Start your Omarchy session first."
+TXT_ERR_NO_PLUGIN="The TAPO Cameras plugin isn't loaded. Enable it: omarchy plugin enable $PLUGIN_ID"
+TXT_ERR_NO_OMARCHY="omarchy-shell was not found on PATH. TAPO Cameras requires Omarchy 4+."
+
+err() { echo "tapo-cameras: $*" >&2; }
+
+ipc() { omarchy-shell "$IPC_TARGET" "$@" 2>>"$LOG_FILE"; }
+
+require_plugin() {
+  command -v omarchy-shell >/dev/null 2>&1 || { err "$TXT_ERR_NO_OMARCHY"; exit 1; }
+  local probe
+  probe="$(omarchy-shell "$IPC_TARGET" status 2>&1 >/dev/null)" && return 0
+  case "$probe" in
+    *"Target not found"*|*"Function not found"*) err "$TXT_ERR_NO_PLUGIN" ;;
+    *) err "$TXT_ERR_NO_SHELL" ;;
+  esac
+  exit 1
+}
+
+cmd_status() {
+  require_plugin
+  command -v jq >/dev/null 2>&1 || { err "jq is required for status"; exit 1; }
+  local j; j="$(ipc status 2>/dev/null || echo '{}')"
+  printf 'status:         %s\n' "$(jq -r '.streamState // "unknown"' <<<"$j")"
+  printf 'enabled:        %s\n' "$(jq -r '.enabled // false' <<<"$j")"
+  printf 'camera:         %s\n' "$(jq -r '.activeCameraName // "(none)"' <<<"$j")"
+  printf 'auto-reconnect: %s\n' "$(jq -r 'if .autoReconnect == false then "off" else "on" end' <<<"$j")"
+  printf 'auto-pause:     %s\n' "$(jq -r 'if .pauseOnFullscreen == true then "on" else "off" end' <<<"$j")"
+  printf 'pip:            %sx%s at (%s,%s)\n' \
+    "$(jq -r '.pipWidth // 0' <<<"$j")" \
+    "$(jq -r '.pipHeight // 0' <<<"$j")" \
+    "$(jq -r '.pipX // 0' <<<"$j")" \
+    "$(jq -r '.pipY // 0' <<<"$j")"
+  local n; n="$(jq -r '(.cameras // []) | length' <<<"$j")"
+  if [ "${n:-0}" -gt 0 ]; then
+    printf 'cameras:\n'
+    jq -r '(.cameras // [])[] | "  \(.name)  \(.host):\(.port // 554)\(.path // "/stream2")  [\(.id)]"' <<<"$j"
+  fi
+}
+
+cmd_play() {
+  require_plugin
+  ipc play "${1:-}" >/dev/null
+}
+
+cmd_select() {
+  require_plugin
+  ipc select "${1:-}" >/dev/null
+}
+
+cmd_stop() {
+  require_plugin
+  ipc stop >/dev/null
+}
+
+cmd_toggle() {
+  require_plugin
+  ipc toggle >/dev/null
+}
+
+case "${1:-status}" in
+  status|"") cmd_status ;;
+  play)      shift; cmd_play "${1:-}" ;;
+  select)    shift; cmd_select "${1:-}" ;;
+  stop)      cmd_stop ;;
+  toggle)    cmd_toggle ;;
+  pause)     require_plugin; ipc pause >/dev/null ;;
+  resume)    require_plugin; ipc resume >/dev/null ;;
+  -h|--help)
+    cat <<USAGE
+$APP_NAME — control the Omarchy TAPO Cameras plugin.
+
+Usage: ${0##*/} [command]
+  status              Print current state (default)
+  play [camera-id]    Start / switch camera stream
+  select <camera-id>  Select camera without forcing play
+  stop                Stop the stream and hide playback
+  toggle              Pause / resume (or start if stopped)
+  pause | resume      Pause or resume the stream
+
+Configure cameras from the bar panel (camera icon).
+USAGE
+    ;;
+  *) err "unknown command: $1 (try --help)"; exit 1 ;;
+esac
