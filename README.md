@@ -20,8 +20,8 @@ View TP-Link TAPO security cameras via RTSP in a floating picture-in-picture win
 ### Recommended (dependencies + plugin + CLI)
 
 ```bash
-git clone https://github.com/martin-zayas/martin-zayas-tapo-cameras.git
-cd martin-zayas-tapo-cameras
+git clone https://github.com/martin-zayas/omarchy-plugin-tapo-cameras.git
+cd omarchy-plugin-tapo-cameras
 ./install.sh
 ```
 
@@ -30,7 +30,7 @@ cd martin-zayas-tapo-cameras
 ### Plugin only (no dependency install)
 
 ```bash
-omarchy plugin add https://github.com/martin-zayas/martin-zayas-tapo-cameras.git --enable
+omarchy plugin add https://github.com/martin-zayas/omarchy-plugin-tapo-cameras.git --enable
 ```
 
 Install RTSP packages manually if needed:
@@ -115,7 +115,7 @@ Optional seed in `~/.config/omarchy/shell.json` under `plugins[]` (hosts only, n
 ## Development
 
 ```bash
-ln -s /path/to/martin-zayas-tapo-cameras ~/.config/omarchy/plugins/martin-zayas-tapo-cameras
+ln -s /path/to/omarchy-plugin-tapo-cameras ~/.config/omarchy/plugins/martin-zayas-tapo-cameras
 omarchy plugin validate .
 omarchy restart shell
 ```
