@@ -545,14 +545,6 @@ Item {
     persistState()
   }
 
-  function pipDragModifiersActive(modifiers) {
-    // Super/Mod4 may be consumed by Hyprland before it reaches layer-shell surfaces.
-    // Accept drag when modifiers are present, or when none are reported (Wayland fallback).
-    return (modifiers & Qt.MetaModifier)
-      || (modifiers & Qt.ControlModifier)
-      || modifiers === Qt.NoModifier
-  }
-
   function syncStream() {
     if (!pipPlayer) return
     var url = root.activeRtspUrl
@@ -604,7 +596,7 @@ Item {
 
     WlrLayershell.namespace: "martin-zayas-tapo-cameras-pip"
     WlrLayershell.layer: WlrLayer.Top
-    WlrLayershell.keyboardFocus: pipCard.containsPointer
+    WlrLayershell.keyboardFocus: (pipHover.hovered || pipDrag.active)
       ? WlrKeyboardFocus.OnDemand
       : WlrKeyboardFocus.None
     exclusionMode: ExclusionMode.Ignore
@@ -623,10 +615,37 @@ Item {
       color: Color.popups.background
       borderSpec: pipWindow.chromeBorderSpec
       radius: Style.cornerRadius
-      property bool containsPointer: pipHover.hovered || pipDragArea.containsMouse
 
       HoverHandler {
         id: pipHover
+        onHoveredChanged: if (hovered) videoControls.reveal()
+        onPointChanged: if (containsMouse) videoControls.reveal()
+      }
+
+      DragHandler {
+        id: pipDrag
+        target: null
+        acceptedButtons: Qt.LeftButton
+        grabPermissions: PointerHandler.TakeOverForbidden
+
+        property real _startX: 0
+        property real _startY: 0
+
+        onActiveChanged: {
+          if (active) {
+            _startX = root.pipX
+            _startY = root.pipY
+            videoControls.reveal()
+          } else {
+            root.clampPipToScreen()
+            root.persistState()
+          }
+        }
+
+        onTranslationChanged: {
+          root.pipX = Math.max(0, _startX + translation.x)
+          root.pipY = Math.max(0, _startY + translation.y)
+        }
       }
 
       Item {
@@ -648,58 +667,11 @@ Item {
         }
       }
 
-      MouseArea {
-        id: pipDragArea
-        anchors.fill: videoFrame
-        z: 1
-        hoverEnabled: true
-        acceptedButtons: Qt.LeftButton
-        propagateComposedEvents: true
-
-        property real _dragStartX: 0
-        property real _dragStartY: 0
-        property real _pressX: 0
-        property real _pressY: 0
-        property bool dragging: false
-
-        onEntered: videoControls.reveal()
-        onPositionChanged: function(mouse) {
-          videoControls.reveal()
-          if (!dragging) return
-          root.pipX = Math.max(0, _dragStartX + mouse.x - _pressX)
-          root.pipY = Math.max(0, _dragStartY + mouse.y - _pressY)
-        }
-
-        onPressed: function(mouse) {
-          if (videoControls._shown && pipActionBtn.contains(mapToItem(pipActionBtn, mouse.x, mouse.y))) {
-            mouse.accepted = false
-            return
-          }
-          if (!root.pipDragModifiersActive(mouse.modifiers)) {
-            mouse.accepted = false
-            return
-          }
-          dragging = true
-          _dragStartX = root.pipX
-          _dragStartY = root.pipY
-          _pressX = mouse.x
-          _pressY = mouse.y
-        }
-
-        onReleased: function(mouse) {
-          if (!dragging) return
-          dragging = false
-          root.clampPipToScreen()
-          root.persistState()
-        }
-
-        onCanceled: dragging = false
-      }
-
       Item {
         id: videoControls
         anchors.fill: videoFrame
         z: 2
+        enabled: _shown
         opacity: _shown ? 1.0 : 0.0
         property bool _shown: false
 
