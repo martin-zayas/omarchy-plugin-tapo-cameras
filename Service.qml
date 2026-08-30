@@ -82,8 +82,8 @@ Item {
   property string activeCameraId: ""
   property bool enabled: false
   property bool pipVisible: true
-  property int pipX: 1200
-  property int pipY: 80
+  property int pipX: -1
+  property int pipY: -1
   property int pipWidth: 640
   property int pipHeight: 360
   property string pipScreen: ""
@@ -250,6 +250,7 @@ Item {
         root.autoReconnect = (o.autoReconnect !== false && String(o.autoReconnect) !== "false")
       }
       if (root.pipMaximized) root.applyPipMaximizedLayout()
+      else root.normalizePipPosition()
       return true
     } catch (e) {
       console.warn("tapo-cameras: bad state.json:", e)
@@ -456,8 +457,32 @@ Item {
 
   Timer { interval: 400; running: true; repeat: false; onTriggered: root.refreshFullscreen() }
 
+  function pipBorderThickness() {
+    return Math.max(1, Style.space(2)) * 2
+  }
+
+  function anchorPipTopRight() {
+    var s = pipScreenInfo()
+    if (!s) return
+    var margin = Style.gapsOut
+    var borderW = pipBorderThickness()
+    root.pipX = Math.max(margin, (s.width || 1920) - root.pipWidth - borderW - margin)
+    root.pipY = margin
+  }
+
+  function normalizePipPosition() {
+    if (root.pipMaximized) {
+      root.applyPipMaximizedLayout()
+      return
+    }
+    if (root.pipX < 0 || root.pipY < 0 || (root.pipX === 1200 && root.pipY === 80)) {
+      root.anchorPipTopRight()
+    }
+    root.clampPipToScreen()
+  }
+
   function pipChromeHeight() {
-    return Style.spacing.controlHeight + Math.max(1, Style.space(2)) * 2
+    return pipBorderThickness()
   }
 
   function applyPipMaximizedLayout() {
@@ -495,9 +520,9 @@ Item {
     if (!s) return
     var sw = s.width || 1920
     var sh = s.height || 1080
-    var chromeV = pipCard.borderTop + pipCard.borderBottom + titleBar.height
-    if (root.pipX + root.pipWidth > sw) root.pipX = Math.max(0, sw - root.pipWidth)
-    if (root.pipY + root.pipHeight + chromeV > sh) root.pipY = Math.max(0, sh - root.pipHeight - chromeV)
+    var borderV = pipBorderThickness()
+    if (root.pipX + root.pipWidth + borderV > sw) root.pipX = Math.max(0, sw - root.pipWidth - borderV)
+    if (root.pipY + root.pipHeight + borderV > sh) root.pipY = Math.max(0, sh - root.pipHeight - borderV)
   }
 
   function setPipSizePreset(preset) {
@@ -518,6 +543,14 @@ Item {
     }
     clampPipToScreen()
     persistState()
+  }
+
+  function pipDragModifiersActive(modifiers) {
+    // Super/Mod4 may be consumed by Hyprland before it reaches layer-shell surfaces.
+    // Accept drag when modifiers are present, or when none are reported (Wayland fallback).
+    return (modifiers & Qt.MetaModifier)
+      || (modifiers & Qt.ControlModifier)
+      || modifiers === Qt.NoModifier
   }
 
   function syncStream() {
@@ -571,7 +604,9 @@ Item {
 
     WlrLayershell.namespace: "martin-zayas-tapo-cameras-pip"
     WlrLayershell.layer: WlrLayer.Top
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+    WlrLayershell.keyboardFocus: pipCard.containsPointer
+      ? WlrKeyboardFocus.OnDemand
+      : WlrKeyboardFocus.None
     exclusionMode: ExclusionMode.Ignore
     mask: Region { item: pipCard }
 
@@ -584,79 +619,25 @@ Item {
       x: root.pipX
       y: root.pipY
       width: root.pipWidth
-      height: root.pipHeight + titleBar.height + pipCard.borderTop + pipCard.borderBottom
+      height: root.pipHeight + pipCard.borderTop + pipCard.borderBottom
       color: Color.popups.background
       borderSpec: pipWindow.chromeBorderSpec
       radius: Style.cornerRadius
+      property bool containsPointer: pipHover.hovered || pipDragArea.containsMouse
 
-      property real _dragStartX: 0
-      property real _dragStartY: 0
-
-      DragHandler {
-        target: null
-        acceptedModifiers: Qt.MetaModifier
-        acceptedButtons: Qt.LeftButton
-        onActiveChanged: {
-          if (active) {
-            pipCard._dragStartX = root.pipX
-            pipCard._dragStartY = root.pipY
-          } else {
-            root.clampPipToScreen()
-            root.persistState()
-          }
-        }
-        onTranslationChanged: {
-          root.pipX = Math.max(0, pipCard._dragStartX + translation.x)
-          root.pipY = Math.max(0, pipCard._dragStartY + translation.y)
-        }
-      }
-
-      Rectangle {
-        id: titleBar
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.topMargin: pipCard.borderTop
-        anchors.leftMargin: pipCard.borderLeft
-        anchors.rightMargin: pipCard.borderRight
-        height: Style.spacing.controlHeight
-        color: Qt.rgba(chromeFg.r, chromeFg.g, chromeFg.b, 0.06)
-        radius: Style.cornerRadius
-
-        Text {
-          textFormat: Text.PlainText
-          anchors.left: parent.left
-          anchors.leftMargin: Style.spacing.controlPaddingX
-          anchors.verticalCenter: parent.verticalCenter
-          width: parent.width - Style.spacing.controlPaddingX * 2 - 24
-          text: root.activeCameraName() || "TAPO Camera"
-          color: chromeFg
-          font.family: fontFamily
-          font.pixelSize: Style.font.bodySmall
-          elide: Text.ElideRight
-        }
-
-        Text {
-          textFormat: Text.PlainText
-          anchors.right: parent.right
-          anchors.rightMargin: Style.spacing.controlPaddingX
-          anchors.verticalCenter: parent.verticalCenter
-          text: root.streamState === "disconnected" || root.streamState === "error" ? "󰖪" : "󰕧"
-          color: root.streamState === "playing" ? Color.accent : Qt.darker(chromeFg, 1.4)
-          font.family: fontFamily
-          font.pixelSize: Style.font.body
-        }
+      HoverHandler {
+        id: pipHover
       }
 
       Item {
         id: videoFrame
-        anchors.top: titleBar.bottom
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
+        anchors.fill: parent
+        anchors.margins: 0
+        anchors.topMargin: pipCard.borderTop
         anchors.leftMargin: pipCard.borderLeft
         anchors.rightMargin: pipCard.borderRight
         anchors.bottomMargin: pipCard.borderBottom
+        clip: true
         layer.enabled: true
         layer.smooth: true
 
@@ -667,76 +648,126 @@ Item {
         }
       }
 
-      Item {
-        id: videoOverlay
+      MouseArea {
+        id: pipDragArea
         anchors.fill: videoFrame
         z: 1
+        hoverEnabled: true
+        acceptedButtons: Qt.LeftButton
+        propagateComposedEvents: true
 
-        HoverHandler {
-          id: videoHover
-          onHoveredChanged: if (hovered) videoControls.reveal()
-          onPointChanged: if (containsMouse) videoControls.reveal()
+        property real _dragStartX: 0
+        property real _dragStartY: 0
+        property real _pressX: 0
+        property real _pressY: 0
+        property bool dragging: false
+
+        onEntered: videoControls.reveal()
+        onPositionChanged: function(mouse) {
+          videoControls.reveal()
+          if (!dragging) return
+          root.pipX = Math.max(0, _dragStartX + mouse.x - _pressX)
+          root.pipY = Math.max(0, _dragStartY + mouse.y - _pressY)
         }
 
-        MouseArea {
-          anchors.fill: parent
-          hoverEnabled: true
-          acceptedButtons: Qt.NoButton
-          onPositionChanged: videoControls.reveal()
-          onEntered: videoControls.reveal()
+        onPressed: function(mouse) {
+          if (videoControls._shown && pipActionBtn.contains(mapToItem(pipActionBtn, mouse.x, mouse.y))) {
+            mouse.accepted = false
+            return
+          }
+          if (!root.pipDragModifiersActive(mouse.modifiers)) {
+            mouse.accepted = false
+            return
+          }
+          dragging = true
+          _dragStartX = root.pipX
+          _dragStartY = root.pipY
+          _pressX = mouse.x
+          _pressY = mouse.y
         }
 
-        Item {
-          id: videoControls
-          anchors.fill: parent
-          opacity: _shown ? 1.0 : 0.0
-          property bool _shown: false
+        onReleased: function(mouse) {
+          if (!dragging) return
+          dragging = false
+          root.clampPipToScreen()
+          root.persistState()
+        }
 
-          Behavior on opacity {
-            NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
-          }
+        onCanceled: dragging = false
+      }
 
-          Timer {
-            id: hideControlsTimer
-            interval: 3000
-            repeat: false
-            onTriggered: videoControls._shown = false
-          }
+      Item {
+        id: videoControls
+        anchors.fill: videoFrame
+        z: 2
+        opacity: _shown ? 1.0 : 0.0
+        property bool _shown: false
 
-          function reveal() {
-            _shown = true
-            hideControlsTimer.restart()
-          }
+        Behavior on opacity {
+          NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
+        }
 
-          Rectangle {
-            id: maximizeBtn
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            anchors.margins: Style.spacing.sm
-            width: Style.space(36)
-            height: Style.space(36)
-            radius: Style.cornerRadius
-            color: Qt.rgba(0, 0, 0, 0.65)
+        Timer {
+          id: hideControlsTimer
+          interval: 3000
+          repeat: false
+          onTriggered: videoControls._shown = false
+        }
+
+        function reveal() {
+          _shown = true
+          hideControlsTimer.restart()
+        }
+
+        Rectangle {
+          id: pipActionBtn
+          anchors.right: parent.right
+          anchors.bottom: parent.bottom
+          anchors.margins: Style.spacing.sm
+          height: Style.space(36)
+          width: Math.min(
+            parent.width - Style.spacing.sm * 2,
+            pipActionLabel.implicitWidth + Style.space(36) + Style.spacing.controlPaddingX * 2
+          )
+          radius: Style.cornerRadius
+          color: Qt.rgba(0, 0, 0, 0.65)
+
+          Row {
+            id: pipActionLabel
+            anchors.centerIn: parent
+            spacing: Style.spacing.sm
 
             Text {
               textFormat: Text.PlainText
-              anchors.centerIn: parent
+              text: root.activeCameraName() || "TAPO Camera"
+              color: "#ffffff"
+              font.family: fontFamily
+              font.pixelSize: Style.font.bodySmall
+              elide: Text.ElideRight
+              width: Math.min(
+                implicitWidth,
+                pipActionBtn.width - Style.space(36) - Style.spacing.controlPaddingX * 2 - Style.spacing.sm
+              )
+            }
+
+            Text {
+              textFormat: Text.PlainText
               text: root.pipMaximized ? "󰊓" : "󰊔"
               color: "#ffffff"
               font.family: fontFamily
               font.pixelSize: Style.font.body
             }
+          }
 
-            MouseArea {
-              anchors.fill: parent
-              cursorShape: Qt.PointingHandCursor
-              hoverEnabled: true
-              enabled: videoControls._shown
-              onEntered: videoControls.reveal()
-              onClicked: {
-                root.togglePipMaximize()
-                videoControls.reveal()
-              }
+          MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            hoverEnabled: true
+            enabled: videoControls._shown
+            onEntered: videoControls.reveal()
+            onClicked: {
+              root.togglePipMaximize()
+              videoControls.reveal()
             }
           }
         }
@@ -746,7 +777,7 @@ Item {
         textFormat: Text.PlainText
         visible: root.streamState === "disconnected" || root.streamState === "error" || root.streamState === "stopped"
         anchors.centerIn: videoFrame
-        z: 2
+        z: 3
         width: videoFrame.width - Style.space(16)
         horizontalAlignment: Text.AlignHCenter
         wrapMode: Text.WordWrap
@@ -824,7 +855,7 @@ Item {
     if (root.pipScreen === "" && Quickshell.screens.length > 0) {
       root.pipScreen = String(Quickshell.screens[0].name)
     }
-    clampPipToScreen()
+    root.normalizePipPosition()
     root.persistState()
     root.syncStream()
     return root.statusObject()
