@@ -113,6 +113,24 @@ BarWidget {
     }
   }
 
+  function syncBarGeometryToService() {
+    if (!root.service || !root.bar) return
+    root.service.setBarGeometry(root.bar.position, root.bar.barSize)
+  }
+
+  Component.onCompleted: syncBarGeometryToService()
+
+  Connections {
+    target: root.bar
+    function onBarSizeChanged() { root.syncBarGeometryToService() }
+    function onPositionChanged() { root.syncBarGeometryToService() }
+  }
+
+  Connections {
+    target: root.service
+    function onPipScreenChanged() { root.syncBarGeometryToService() }
+  }
+
   KeyboardPanel {
     id: kpanel
     anchorItem: button

@@ -101,6 +101,28 @@ Item {
   property bool _stateLoaded: false
   property bool _credsLoaded: false
   property string _seedSig: ""
+  property string barPosition: "top"
+  property int barCrossSize: Style.bar.sizeHorizontal
+
+  function setBarGeometry(position, crossSize) {
+    root.barPosition = String(position || "top")
+    var n = parseInt(crossSize, 10)
+    if (!isNaN(n) && n > 0) root.barCrossSize = n
+  }
+
+  // Match KeyboardPanel placement below the bar (cardOrigin.y for top bar).
+  function pipBelowBarOffset() {
+    var gap = Style.gapsOut
+    switch (String(root.barPosition || "top")) {
+      case "bottom":
+        return gap
+      case "left":
+      case "right":
+        return gap
+      default:
+        return root.barCrossSize + gap
+    }
+  }
 
   function activeCamera() {
     var id = String(root.activeCameraId || "")
@@ -467,7 +489,7 @@ Item {
     var margin = Style.gapsOut
     var borderW = pipBorderThickness()
     root.pipX = Math.max(margin, (s.width || 1920) - root.pipWidth - borderW - margin)
-    root.pipY = margin
+    root.pipY = pipBelowBarOffset()
   }
 
   function normalizePipPosition() {
@@ -475,8 +497,11 @@ Item {
       root.applyPipMaximizedLayout()
       return
     }
+    var minY = pipBelowBarOffset()
     if (root.pipX < 0 || root.pipY < 0 || (root.pipX === 1200 && root.pipY === 80)) {
       root.anchorPipTopRight()
+    } else if (root.pipY < minY) {
+      root.pipY = minY
     }
     root.clampPipToScreen()
   }
@@ -490,10 +515,11 @@ Item {
     if (!s) return
     var margin = Style.gapsOut
     var chromeV = pipChromeHeight()
+    var topInset = pipBelowBarOffset()
     root.pipX = margin
-    root.pipY = margin
+    root.pipY = topInset
     root.pipWidth = Math.max(160, (s.width || 1920) - margin * 2)
-    root.pipHeight = Math.max(90, (s.height || 1080) - margin * 2 - chromeV)
+    root.pipHeight = Math.max(90, (s.height || 1080) - topInset - margin - chromeV)
   }
 
   function togglePipMaximize() {
@@ -521,8 +547,10 @@ Item {
     var sw = s.width || 1920
     var sh = s.height || 1080
     var borderV = pipBorderThickness()
+    var minY = pipBelowBarOffset()
     if (root.pipX + root.pipWidth + borderV > sw) root.pipX = Math.max(0, sw - root.pipWidth - borderV)
-    if (root.pipY + root.pipHeight + borderV > sh) root.pipY = Math.max(0, sh - root.pipHeight - borderV)
+    if (root.pipY < minY) root.pipY = minY
+    if (root.pipY + root.pipHeight + borderV > sh) root.pipY = Math.max(minY, sh - root.pipHeight - borderV)
   }
 
   function setPipSizePreset(preset) {
