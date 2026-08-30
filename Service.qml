@@ -84,11 +84,17 @@ Item {
   property bool pipVisible: true
   property int pipX: 1200
   property int pipY: 80
-  property int pipWidth: 480
-  property int pipHeight: 270
+  property int pipWidth: 640
+  property int pipHeight: 360
   property string pipScreen: ""
   property bool pauseOnFullscreen: false
   property bool autoReconnect: true
+  property bool hqStream: false
+  property bool pipMaximized: false
+  property int pipRestoreX: 1200
+  property int pipRestoreY: 80
+  property int pipRestoreWidth: 640
+  property int pipRestoreHeight: 360
   property bool manualPaused: false
   property string streamState: "stopped"   // stopped | playing | paused | disconnected | error
   property var credentials: ({})
@@ -113,12 +119,18 @@ Item {
     return encodeURIComponent(String(s || ""))
   }
 
+  function playbackStreamPath(path) {
+    var p = safeStreamPath(path)
+    if (root.hqStream && p === "/stream2") return "/stream1"
+    return p
+  }
+
   function buildRtspUrl(camera) {
     if (!camera) return ""
     var host = safeHost(camera.host)
     if (host === "") return ""
     var port = safePort(camera.port)
-    var path = safeStreamPath(camera.path)
+    var path = playbackStreamPath(camera.path)
     var user = encodeUserInfo(camera.username)
     var pass = encodeUserInfo(root.credentials[String(camera.id)] || "")
     if (user !== "" || pass !== "") {
@@ -190,7 +202,13 @@ Item {
       pipHeight: root.pipHeight,
       pipScreen: root.pipScreen,
       pauseOnFullscreen: root.pauseOnFullscreen,
-      autoReconnect: root.autoReconnect
+      autoReconnect: root.autoReconnect,
+      hqStream: root.hqStream,
+      pipMaximized: root.pipMaximized,
+      pipRestoreX: root.pipRestoreX,
+      pipRestoreY: root.pipRestoreY,
+      pipRestoreWidth: root.pipRestoreWidth,
+      pipRestoreHeight: root.pipRestoreHeight
     }, null, 2) + "\n"
     root.writeFile(root.statePath, payload)
   }
@@ -216,8 +234,14 @@ Item {
       if (o.pipVisible !== undefined) root.pipVisible = (o.pipVisible !== false && String(o.pipVisible) !== "false")
       if (o.pipX !== undefined) root.pipX = Math.max(0, parseInt(o.pipX, 10) || 0)
       if (o.pipY !== undefined) root.pipY = Math.max(0, parseInt(o.pipY, 10) || 0)
-      if (o.pipWidth !== undefined) root.pipWidth = Math.max(160, parseInt(o.pipWidth, 10) || 480)
-      if (o.pipHeight !== undefined) root.pipHeight = Math.max(90, parseInt(o.pipHeight, 10) || 270)
+      if (o.pipWidth !== undefined) root.pipWidth = Math.max(160, parseInt(o.pipWidth, 10) || 640)
+      if (o.pipHeight !== undefined) root.pipHeight = Math.max(90, parseInt(o.pipHeight, 10) || 360)
+      if (o.hqStream !== undefined) root.hqStream = (o.hqStream === true || String(o.hqStream) === "true")
+      if (o.pipMaximized !== undefined) root.pipMaximized = (o.pipMaximized === true || String(o.pipMaximized) === "true")
+      if (o.pipRestoreX !== undefined) root.pipRestoreX = Math.max(0, parseInt(o.pipRestoreX, 10) || 0)
+      if (o.pipRestoreY !== undefined) root.pipRestoreY = Math.max(0, parseInt(o.pipRestoreY, 10) || 0)
+      if (o.pipRestoreWidth !== undefined) root.pipRestoreWidth = Math.max(160, parseInt(o.pipRestoreWidth, 10) || 640)
+      if (o.pipRestoreHeight !== undefined) root.pipRestoreHeight = Math.max(90, parseInt(o.pipRestoreHeight, 10) || 360)
       if (o.pipScreen !== undefined) root.pipScreen = safeName(o.pipScreen, "")
       if (o.pauseOnFullscreen !== undefined) {
         root.pauseOnFullscreen = (o.pauseOnFullscreen === true || String(o.pauseOnFullscreen) === "true")
@@ -225,6 +249,7 @@ Item {
       if (o.autoReconnect !== undefined) {
         root.autoReconnect = (o.autoReconnect !== false && String(o.autoReconnect) !== "false")
       }
+      if (root.pipMaximized) root.applyPipMaximizedLayout()
       return true
     } catch (e) {
       console.warn("tapo-cameras: bad state.json:", e)
@@ -431,28 +456,64 @@ Item {
 
   Timer { interval: 400; running: true; repeat: false; onTriggered: root.refreshFullscreen() }
 
+  function pipChromeHeight() {
+    return Style.spacing.controlHeight + Math.max(1, Style.space(2)) * 2
+  }
+
+  function applyPipMaximizedLayout() {
+    var s = pipScreenInfo()
+    if (!s) return
+    var margin = Style.gapsOut
+    var chromeV = pipChromeHeight()
+    root.pipX = margin
+    root.pipY = margin
+    root.pipWidth = Math.max(160, (s.width || 1920) - margin * 2)
+    root.pipHeight = Math.max(90, (s.height || 1080) - margin * 2 - chromeV)
+  }
+
+  function togglePipMaximize() {
+    if (!root.pipMaximized) {
+      root.pipRestoreX = root.pipX
+      root.pipRestoreY = root.pipY
+      root.pipRestoreWidth = root.pipWidth
+      root.pipRestoreHeight = root.pipHeight
+      root.pipMaximized = true
+      root.applyPipMaximizedLayout()
+    } else {
+      root.pipMaximized = false
+      root.pipX = root.pipRestoreX
+      root.pipY = root.pipRestoreY
+      root.pipWidth = root.pipRestoreWidth
+      root.pipHeight = root.pipRestoreHeight
+      root.clampPipToScreen()
+    }
+    root.persistState()
+  }
+
   function clampPipToScreen() {
     var s = pipScreenInfo()
     if (!s) return
     var sw = s.width || 1920
     var sh = s.height || 1080
+    var chromeV = pipCard.borderTop + pipCard.borderBottom + titleBar.height
     if (root.pipX + root.pipWidth > sw) root.pipX = Math.max(0, sw - root.pipWidth)
-    if (root.pipY + root.pipHeight > sh) root.pipY = Math.max(0, sh - root.pipHeight)
+    if (root.pipY + root.pipHeight + chromeV > sh) root.pipY = Math.max(0, sh - root.pipHeight - chromeV)
   }
 
   function setPipSizePreset(preset) {
+    root.pipMaximized = false
     switch (String(preset || "M").toUpperCase()) {
       case "S":
-        root.pipWidth = 320
-        root.pipHeight = 180
-        break
-      case "L":
-        root.pipWidth = 640
-        root.pipHeight = 360
-        break
-      default:
         root.pipWidth = 480
         root.pipHeight = 270
+        break
+      case "L":
+        root.pipWidth = 960
+        root.pipHeight = 540
+        break
+      default:
+        root.pipWidth = 640
+        root.pipHeight = 360
         break
     }
     clampPipToScreen()
@@ -487,6 +548,7 @@ Item {
   onShouldPlayChanged: syncStream()
   onManualPausedChanged: syncStream()
   onCredentialsChanged: syncStream()
+  onHqStreamChanged: syncStream()
 
   Timer {
     id: reconnectTimer
@@ -513,26 +575,52 @@ Item {
     exclusionMode: ExclusionMode.Ignore
     mask: Region { item: pipCard }
 
-    readonly property color chromeFg: Color.foreground
-    readonly property color chromeBg: Qt.rgba(0, 0, 0, 0.75)
+    readonly property color chromeFg: Color.popups.text
     readonly property string fontFamily: Style.font.family
+    readonly property var chromeBorderSpec: Border.surfaceSpec("popups", "border", Color.popups.border, Math.max(1, Style.space(2)))
 
-    Rectangle {
+    BorderSurface {
       id: pipCard
       x: root.pipX
       y: root.pipY
       width: root.pipWidth
-      height: root.pipHeight + titleBar.height
-      color: chromeBg
+      height: root.pipHeight + titleBar.height + pipCard.borderTop + pipCard.borderBottom
+      color: Color.popups.background
+      borderSpec: pipWindow.chromeBorderSpec
       radius: Style.cornerRadius
-      border.color: Qt.rgba(chromeFg.r, chromeFg.g, chromeFg.b, 0.25)
-      border.width: 1
+
+      property real _dragStartX: 0
+      property real _dragStartY: 0
+
+      DragHandler {
+        target: null
+        acceptedModifiers: Qt.MetaModifier
+        acceptedButtons: Qt.LeftButton
+        onActiveChanged: {
+          if (active) {
+            pipCard._dragStartX = root.pipX
+            pipCard._dragStartY = root.pipY
+          } else {
+            root.clampPipToScreen()
+            root.persistState()
+          }
+        }
+        onTranslationChanged: {
+          root.pipX = Math.max(0, pipCard._dragStartX + translation.x)
+          root.pipY = Math.max(0, pipCard._dragStartY + translation.y)
+        }
+      }
 
       Rectangle {
         id: titleBar
-        width: parent.width
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.topMargin: pipCard.borderTop
+        anchors.leftMargin: pipCard.borderLeft
+        anchors.rightMargin: pipCard.borderRight
         height: Style.spacing.controlHeight
-        color: Qt.rgba(chromeFg.r, chromeFg.g, chromeFg.b, 0.08)
+        color: Qt.rgba(chromeFg.r, chromeFg.g, chromeFg.b, 0.06)
         radius: Style.cornerRadius
 
         Text {
@@ -558,43 +646,108 @@ Item {
           font.family: fontFamily
           font.pixelSize: Style.font.body
         }
-
-        property real _dragStartX: 0
-        property real _dragStartY: 0
-
-        DragHandler {
-          target: null
-          onActiveChanged: {
-            if (active) {
-              _dragStartX = root.pipX
-              _dragStartY = root.pipY
-            } else {
-              root.clampPipToScreen()
-              root.persistState()
-            }
-          }
-          onTranslationChanged: {
-            root.pipX = Math.max(0, _dragStartX + translation.x)
-            root.pipY = Math.max(0, _dragStartY + translation.y)
-          }
-        }
       }
 
-      VideoOutput {
-        id: videoOut
+      Item {
+        id: videoFrame
         anchors.top: titleBar.bottom
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        anchors.margins: 1
-        fillMode: VideoOutput.PreserveAspectFit
+        anchors.leftMargin: pipCard.borderLeft
+        anchors.rightMargin: pipCard.borderRight
+        anchors.bottomMargin: pipCard.borderBottom
+        layer.enabled: true
+        layer.smooth: true
+
+        VideoOutput {
+          id: videoOut
+          anchors.fill: parent
+          fillMode: VideoOutput.PreserveAspectFit
+        }
+      }
+
+      Item {
+        id: videoOverlay
+        anchors.fill: videoFrame
+        z: 1
+
+        HoverHandler {
+          id: videoHover
+          onHoveredChanged: if (hovered) videoControls.reveal()
+          onPointChanged: if (containsMouse) videoControls.reveal()
+        }
+
+        MouseArea {
+          anchors.fill: parent
+          hoverEnabled: true
+          acceptedButtons: Qt.NoButton
+          onPositionChanged: videoControls.reveal()
+          onEntered: videoControls.reveal()
+        }
+
+        Item {
+          id: videoControls
+          anchors.fill: parent
+          opacity: _shown ? 1.0 : 0.0
+          property bool _shown: false
+
+          Behavior on opacity {
+            NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
+          }
+
+          Timer {
+            id: hideControlsTimer
+            interval: 3000
+            repeat: false
+            onTriggered: videoControls._shown = false
+          }
+
+          function reveal() {
+            _shown = true
+            hideControlsTimer.restart()
+          }
+
+          Rectangle {
+            id: maximizeBtn
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.margins: Style.spacing.sm
+            width: Style.space(36)
+            height: Style.space(36)
+            radius: Style.cornerRadius
+            color: Qt.rgba(0, 0, 0, 0.65)
+
+            Text {
+              textFormat: Text.PlainText
+              anchors.centerIn: parent
+              text: root.pipMaximized ? "󰊓" : "󰊔"
+              color: "#ffffff"
+              font.family: fontFamily
+              font.pixelSize: Style.font.body
+            }
+
+            MouseArea {
+              anchors.fill: parent
+              cursorShape: Qt.PointingHandCursor
+              hoverEnabled: true
+              enabled: videoControls._shown
+              onEntered: videoControls.reveal()
+              onClicked: {
+                root.togglePipMaximize()
+                videoControls.reveal()
+              }
+            }
+          }
+        }
       }
 
       Text {
         textFormat: Text.PlainText
         visible: root.streamState === "disconnected" || root.streamState === "error" || root.streamState === "stopped"
-        anchors.centerIn: videoOut
-        width: videoOut.width - Style.space(16)
+        anchors.centerIn: videoFrame
+        z: 2
+        width: videoFrame.width - Style.space(16)
         horizontalAlignment: Text.AlignHCenter
         wrapMode: Text.WordWrap
         text: root.activeRtspUrl === "" ? "No camera selected"
@@ -650,6 +803,8 @@ Item {
       manualPaused: root.manualPaused,
       pauseOnFullscreen: root.pauseOnFullscreen,
       autoReconnect: root.autoReconnect,
+      hqStream: root.hqStream,
+      pipMaximized: root.pipMaximized,
       pipX: root.pipX,
       pipY: root.pipY,
       pipWidth: root.pipWidth,
@@ -722,6 +877,13 @@ Item {
   function applySetAutoReconnect(on) {
     root.autoReconnect = (on === true || String(on) === "true")
     root.persistState()
+    return root.statusObject()
+  }
+
+  function applySetHqStream(on) {
+    root.hqStream = (on === true || String(on) === "true")
+    root.persistState()
+    root.syncStream()
     return root.statusObject()
   }
 
@@ -830,6 +992,10 @@ Item {
 
     function setAutoReconnect(on: string): string {
       return JSON.stringify(root.applySetAutoReconnect(on))
+    }
+
+    function setHqStream(on: string): string {
+      return JSON.stringify(root.applySetHqStream(on))
     }
 
     function addCamera(cameraJson: string, password: string): string {

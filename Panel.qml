@@ -161,6 +161,15 @@ Item {
       onClicked: if (panel.widget) panel.widget.setAutoReconnect(!checked)
     }
 
+    Toggle {
+      width: parent.width
+      label: "HD stream"
+      description: "Use /stream1 for sharper PiP (more bandwidth)"
+      foreground: panel.fg
+      checked: panel.service ? panel.service.hqStream === true : false
+      onClicked: if (panel.widget) panel.widget.setHqStream(!checked)
+    }
+
     PanelSectionHeader {
       text: "PIP SIZE"
       foreground: panel.fg

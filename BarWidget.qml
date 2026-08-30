@@ -66,6 +66,11 @@ BarWidget {
     else ipc("setAutoReconnect", on ? "true" : "false")
   }
 
+  function setHqStream(on) {
+    if (service) service.applySetHqStream(on)
+    else ipc("setHqStream", on ? "true" : "false")
+  }
+
   function setPipSize(preset) {
     if (service) service.setPipSizePreset(preset)
     else ipc("setPipSize", preset)
